@@ -1,0 +1,455 @@
+---
+title: "Laporan KP"
+author: "Aulia Mirfah Setyo Ayu Damayanti"
+date: "2024-11-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(AER)
+library(tidyverse)
+library(ggplot2)
+library(MASS)
+
+df = read_excel("D:/Kuliah/Semester 5/Kerja Praktik (KP)/Data Laporan KP.xlsx")
+df
+```
+Reformat Categorical Variables
+
+##Marriage Status##
+```{r}
+# Mengubah kolom Marriage_Status sesuai kondisi
+df$Marriage_Status <- ifelse(df$Marriage_Status == "KAWIN", 
+                                "KAWIN", 
+                                "TIDAK KAWIN")
+
+# Mengonversi kolom menjadi faktor
+df$Marriage_Status <- factor(df$Marriage_Status, levels = c("KAWIN", "TIDAK KAWIN"))
+```
+
+##Job##
+```{r}
+# Mengubah kolom Job sesuai kondisi
+df$Job <- ifelse(df$Job == "BUKAN PEKERJA", 
+                   "BUKAN PEKERJA", 
+                   "PEKERJA")
+
+# Mengonversi kolom menjadi faktor
+df$Job <- factor(df$Job, levels = c("PEKERJA", "BUKAN PEKERJA"))
+```
+
+##Type_FKRTL##
+```{r}
+# Reformat kategori Type_FKRTL
+df$Type_FKRTL <- case_when(
+  df$Type_FKRTL %in% c("RS Kelas A", "RS Kelas B", "RS Kelas C", "RS Kelas D") ~ "Kategori 1",
+  df$Type_FKRTL %in% c("RS Swasta Setara Type A", "RS Swasta Setara Type B", "RS Swasta Setara Type C", "RS Swasta Setara Type D", "RS TNI Polri Kelas I", "RS TNI Polri Kelas II", "RS TNI Polri Kelas III", "RS TNI Polri Kelas IV") ~ "Kategori 2",
+  df$Type_FKRTL %in% c("Khusus Bedah", "Khusus Gigi dan Mulut", "Khusus Hemodialisa", "Khusus Ibu dan Anak", "Khusus Jantung", "Khusus Jiwa", "Khusus Kanker Onkologi", "Khusus Kusta", "Khusus Mata", "Khusus Paru", "Khusus Stroke", "Khusus Tulang", "Klinik Non Rawat Inap", "Khusus Lain", "RS Non Provider GawatDarurat", "Missing") ~ "Kategori 3",
+  TRUE ~ "Kategori Tidak Diketahui"  # Untuk data yang tidak sesuai
+)
+
+```
+
+##Varibel Penyakit Lain##
+```{r}
+# Reformat variabel Other_Illness
+df$Other_Illness <- ifelse(grepl("N", df$Other_Illness, ignore.case = TRUE), 
+                              "No", 
+                              "Yes")
+```
+
+```{r}
+table(df$Other_Illness)
+```
+
+
+##Categorical Variables##
+```{r}
+# Pastikan semua variabel kategorik diformat sebagai faktor
+categorical_vars <- c("Sex", "Marriage_Status", "Job", "Type_FKRTL", "Care_Type", "Class", "Condition", "Other_Illness", "Severity_Level", "Regional_Rates")
+
+df[categorical_vars] <- lapply(df[categorical_vars], as.factor)
+```
+
+
+```{r}
+model_pois <- glm(Dialysis_Frequency ~ Sex + Marriage_Status + Job + Type_FKRTL + Care_Type + Class + Condition+ Other_Illness + Regional_Rates+ Age + Sex * Age + Marriage_Status * Age + Job * Other_Illness + Type_FKRTL * Care_Type + Class * Condition + Other_Illness * Regional_Rates + Sex * Type_FKRTL + Age * Class, family = "poisson", data = df)
+summary(model_pois)
+deviance(model_pois)
+```
+
+```{r}
+dispersiontest(model_pois)
+```
+
+```{r}
+model <- lm(Dialysis_Frequency ~ Sex + Job + Severity_Level + Type_FKRTL + Class + Condition + Other_Illness + Regional_Rates + Age, data = df)
+
+```
+
+```{r}
+library(car)
+vif_values <- vif(model)
+print(vif_values)
+
+```
+
+
+
+```{r}
+model_pois <- glm(Dialysis_Frequency ~ Sex+ Job + Severity_Level+Type_FKRTL + Class + Condition+ Other_Illness + Regional_Rates+ Age + Age*Other_Illness+ Job * Sex, family = "poisson", data = df)
+summary(model_pois)
+deviance(model_pois)
+```
+```{r}
+dispersiontest(model_pois)
+```
+
+
+```{r}
+model_nb <- glm.nb(Dialysis_Frequency ~ Sex+ Job + Severity_Level+Type_FKRTL + Class + Condition+ Other_Illness + Regional_Rates+ Age + Age*Other_Illness+ Job * Sex, data = df)
+summary(model_nb)
+```
+
+
+
+##Zero Inflated Models##
+
+```{r}
+library(pscl)
+
+# Zero-Inflated Poisson
+zip_model <- zeroinfl(Dialysis_Frequency ~ Sex+ Job + Severity_Level+Type_FKRTL + Class + Condition+ Other_Illness + Regional_Rates+ Age + Age*Other_Illness+ Job * Sex, 
+                        data = df, dist = "poisson")
+
+summary(zip_model)
+```
+
+```{r}
+# Log-Likelihood dari model Zero-Inflated Poisson
+logLik_model <- logLik(zip_model)
+
+# Log-Likelihood dari Null Model (tanpa prediktor)
+null_model <- update(zip_model, . ~ 1)
+logLik_null <- logLik(null_model)
+
+# Likelihood Ratio Test
+lr_stat <- 2 * (logLik_model - logLik_null)
+p_value <- pchisq(lr_stat, df = attr(logLik_model, "df") - attr(logLik_null, "df"), lower.tail = FALSE)
+
+# Output
+list(
+  logLik_model = logLik_model,
+  logLik_null = logLik_null,
+  lr_stat = lr_stat,
+  p_value = p_value
+)
+
+```
+
+```{r}
+# Hitung nilai Pearson per degrees of freedom
+pearson_resid <- residuals(zip_model, type = "pearson")
+pearson_chi_square <- sum(pearson_resid^2)
+
+# Degrees of freedom
+df_residual <- df.residual(zip_model)
+
+# Pearson Chi-Square per Degrees of Freedom
+pearson_per_df <- pearson_chi_square / df_residual
+
+# Tampilkan hasil
+list(
+  Pearson_Chi_Square = pearson_chi_square,
+  Degrees_of_Freedom = df_residual,
+  Pearson_Per_DF = pearson_per_df
+)
+
+
+```
+
+
+```{r}
+library(pscl)
+
+# Zero-Inflated Negative Binomial Model
+zinb_model <- zeroinfl(Dialysis_Frequency ~ Sex+ Job + Severity_Level+Type_FKRTL + Class + Condition+ Other_Illness + Regional_Rates+ Age + Age*Other_Illness+ Job * Sex, 
+                        data = df, dist = "negbin")
+
+summary(zinb_model)
+```
+
+
+```{r}
+# Log-Likelihood dari model Zero-Inflated Negative Binomial
+logLik_model <- logLik(zinb_model)
+
+# Log-Likelihood dari Null Model (tanpa prediktor)
+null_model <- update(zinb_model, . ~ 1)
+logLik_null <- logLik(null_model)
+
+# Likelihood Ratio Test
+lr_stat <- 2 * (logLik_model - logLik_null)
+p_value <- pchisq(lr_stat, df = attr(logLik_model, "df") - attr(logLik_null, "df"), lower.tail = FALSE)
+
+# Output
+list(
+  logLik_model = logLik_model,
+  logLik_null = logLik_null,
+  lr_stat = lr_stat,
+  p_value = p_value
+)
+
+```
+
+```{r}
+# Hitung residual Pearson
+pearson_resid <- residuals(zinb_model, type = "pearson")
+
+# Hitung Pearson Chi-Square
+pearson_chisq <- sum(pearson_resid^2)
+print(paste("Pearson Chi-Square:", pearson_chisq))
+
+# Hitung derajat bebas
+n_obs <- nrow(df)  # Jumlah observasi
+n_params <- attr(logLik(zinb_model), "df")  # Jumlah parameter
+df_model <- n_obs - n_params
+
+# Deviasi per derajat bebas
+dispersion_ratio <- pearson_chisq / df_model
+print(paste("Deviasi per derajat bebas:", dispersion_ratio))
+
+# Interpretasi
+if (dispersion_ratio > 1) {
+  print("Model mengalami overdispersi.")
+} else {
+  print("Model tidak mengalami overdispersi.")
+}
+
+```
+
+```{r}
+# Null model
+null_model <- zeroinfl(Dialysis_Frequency ~ 1, data = df, dist = "negbin")
+
+# Log-Likelihood
+loglik_null <- logLik(null_model)
+loglik_full <- logLik(zinb_model)
+
+# Likelihood Ratio (LR)
+lr_statistic <- -2 * (loglik_null - loglik_full)
+print(paste("Nilai LR:", lr_statistic))
+
+# Derajat kebebasan
+df_lr <- attr(loglik_full, "df") - attr(loglik_null, "df")
+
+# Nilai Chi-Square tabel
+chi_critical <- qchisq(0.95, df = df_lr)
+print(paste("Nilai Chi-Square tabel:", chi_critical))
+
+# Keputusan
+if (lr_statistic > chi_critical) {
+  print("Tolak H0: Model penuh lebih baik daripada model null.")
+} else {
+  print("Gagal menolak H0: Model penuh tidak lebih baik secara signifikan.")
+}
+
+```
+
+```{r}
+df_model
+```
+
+
+```{r}
+library(pscl)
+
+# Hurdle Negative Binomial Model
+hurdle_model <- hurdle(Dialysis_Frequency ~ Sex+ Job + Severity_Level+Type_FKRTL + Class + Condition+ Other_Illness + Regional_Rates+ Age + Age*Other_Illness+ Job * Sex, 
+                        data = df, dist = "negbin")
+
+summary(hurdle_model)
+
+```
+
+```{r}
+# Log-likelihood model penuh
+loglik_full <- logLik(hurdle_model)
+
+# Log-likelihood model null (hanya intercept)
+null_model <- hurdle(Dialysis_Frequency ~ 1, 
+                     data = df, dist = "negbin")
+loglik_null <- logLik(null_model)
+
+# Nilai Likelihood Ratio (LR)
+LR_stat <- 2 * (as.numeric(loglik_full) - as.numeric(loglik_null))
+
+# Derajat bebas (df)
+dfree <- attr(loglik_full, "df") - attr(loglik_null, "df")
+
+# Nilai p-value
+p_value <- pchisq(LR_stat, df = dfree, lower.tail = FALSE)
+
+# Tampilkan hasil
+cat("Log-likelihood Model Penuh:", as.numeric(loglik_full), "\n")
+cat("Log-likelihood Model Null:", as.numeric(loglik_null), "\n")
+cat("Likelihood Ratio (LR):", LR_stat, "\n")
+cat("Derajat Bebas (df):", dfree, "\n")
+cat("p-value:", p_value, "\n")
+
+# Interpretasi
+if (p_value < 0.05) {
+  cat("Keputusan: Model penuh lebih baik secara signifikan daripada model null.\n")
+} else {
+  cat("Keputusan: Tidak ada bukti signifikan bahwa model penuh lebih baik daripada model null.\n")
+}
+
+```
+
+```{r}
+# Hitung deviasi (Pearson Chi-Square)
+pearson_residuals <- residuals(hurdle_model, type = "pearson")
+pearson_chisq <- sum(pearson_residuals^2)
+
+# Derajat bebas
+n <- nrow(df) # Jumlah data
+p <- attr(logLik(hurdle_model), "df") # Jumlah parameter dalam model
+dfree <- n - p # Derajat bebas
+
+# Rasio deviasi per derajat bebas
+dispersion_ratio <- pearson_chisq / dfree
+
+# Tampilkan hasil
+cat("Pearson Chi-Square:", pearson_chisq, "\n")
+cat("Derajat Bebas:", dfree, "\n")
+cat("Rasio Deviasi per Derajat Bebas:", dispersion_ratio, "\n")
+
+# Interpretasi
+if (dispersion_ratio > 1) {
+  cat("Kesimpulan: Model mengalami overdispersi.\n")
+} else {
+  cat("Kesimpulan: Model tidak mengalami overdispersi.\n")
+}
+
+```
+
+
+```{r}
+
+# Memuat library
+library(pscl)
+
+# Model Hurdle Poisson
+hurdle_modelp <- hurdle(
+  Dialysis_Frequency ~ Sex + Job + Severity_Level + Type_FKRTL + 
+    Class + Condition + Other_Illness + Regional_Rates + Age + 
+    Age * Other_Illness + Job * Sex, 
+  data = df, 
+  dist = "poisson"
+)
+
+# Ringkasan hasil model
+summary(hurdle_modelp)
+
+
+```
+
+```{r}
+# Log-Likelihood dari model penuh
+loglik_full <- logLik(hurdle_modelp)
+
+# Log-Likelihood dari model null (hanya intercept)
+hurdle_model_null <- hurdle(
+  Dialysis_Frequency ~ 1, 
+  data = df, 
+  dist = "poisson"
+)
+loglik_null <- logLik(hurdle_model_null)
+
+# Hitung Likelihood Ratio (LR)
+LR <- -2 * (as.numeric(loglik_null) - as.numeric(loglik_full))
+
+# Tampilkan hasil
+cat("Log-Likelihood Model Penuh:", as.numeric(loglik_full), "\n")
+cat("Log-Likelihood Model Null:", as.numeric(loglik_null), "\n")
+cat("Nilai Likelihood Ratio (LR):", LR, "\n")
+
+# Bandingkan dengan nilai Chi-Square tabel
+dfree <- length(coef(hurdle_modelp)) - length(coef(hurdle_model_null)) # Derajat bebas
+chi_critical <- qchisq(0.95, dfree) # Nilai kritis pada taraf signifikansi 5%
+cat("Nilai Chi-Square Tabel:", chi_critical, "\n")
+
+# Keputusan
+if (LR > chi_critical) {
+  cat("Keputusan: Tolak H0, model penuh secara signifikan lebih baik daripada model null.\n")
+} else {
+  cat("Keputusan: Gagal menolak H0, model penuh tidak lebih baik dari model null.\n")
+}
+
+```
+```{r}
+# Hitung residual Pearson
+pearson_resid <- residuals(hurdle_modelp, type = "pearson")
+
+# Hitung Pearson Chi-Square
+pearson_chisq <- sum(pearson_resid^2)
+
+# Derajat bebas (df)
+dfree <- df.residual(hurdle_modelp)
+
+# Rasio Pearson Chi-Square terhadap df
+pearson_ratio <- pearson_chisq / dfree
+
+# Tampilkan hasil
+cat("Pearson Chi-Square:", pearson_chisq, "\n")
+cat("Derajat Bebas (df):", dfree, "\n")
+cat("Rasio Pearson Chi-Square / df:", pearson_ratio, "\n")
+
+# Interpretasi
+if (pearson_ratio > 1) {
+  cat("Hasil: Model menunjukkan adanya overdispersi.\n")
+} else {
+  cat("Hasil: Model tidak menunjukkan adanya overdispersi.\n")
+}
+
+```
+
+
+```{r}
+# Calculate AIC, BIC, RMSE, and Log-Likelihood for each model
+models <- list(model_nb, zip_model, zinb_model, hurdle_model, hurdle_modelp)
+
+model_comparisons <- data.frame(
+  Model = c("NB", "ZIP", "ZINB", "Hurdle NB", "Hurdle Poisson"),
+  AIC = sapply(models, AIC),
+  BIC = sapply(models, BIC),
+  LogLik = sapply(models, logLik)
+)
+
+# Calculate RMSE for each model
+model_comparisons$RMSE <- sapply(models, function(model) {
+  pred <- predict(model, type = "response")  # predicted values
+  sqrt(mean((df$Dialysis_Frequency - pred)^2))  # RMSE
+})
+
+# View comparison table
+print(model_comparisons)
+```
+
+```{r}
+library(writexl)
+write_xlsx(df, path = "data KP.xlsx")
+```
+
+
+
+
+
+
+
